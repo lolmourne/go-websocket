@@ -18,6 +18,8 @@ type Hub struct {
 
 	// Unregister requests from clients.
 	unregister chan *Client
+
+	roomID int
 }
 
 func NewHub() *Hub {
