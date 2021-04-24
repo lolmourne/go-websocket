@@ -1,8 +1,6 @@
 package main
 
 import (
-	"log"
-
 	"github.com/lolmourne/go-groupchat/client"
 )
 
@@ -24,13 +22,13 @@ func NewRoomManager(cli client.GroupchatClientItf) RoomManagerItf {
 
 func (r *RoomManager) JoinRoom(roomID int64) *Hub {
 	room := r.cli.GetGroupchatRoom(roomID)
-	if room != nil {
-		log.Println(room.Description)
+	if room == nil {
+		return nil
 	}
 
 	hub, ok := r.hubs[roomID]
 	if !ok {
-		hub = NewHub()
+		hub = NewHub(roomID, sub, rdb)
 		r.hubs[roomID] = hub
 		go r.hubs[roomID].run()
 		return hub

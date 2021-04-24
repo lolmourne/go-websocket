@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
@@ -51,6 +52,21 @@ type Client struct {
 
 	// Buffered channel of outbound messages.
 	send chan []byte
+
+	usr User
+}
+
+type User struct {
+	UserID     int64
+	ProfilePic string
+	Username   string
+}
+
+type Message struct {
+	UserID     int64  `json:"user_id"`
+	UserName   string `json:"username"`
+	ProfilePic string `json:"profile_pic"`
+	Msg        string `json:"msg"`
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -75,7 +91,24 @@ func (c *Client) readPump() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		c.hub.broadcast <- message
+
+		if c.usr.ProfilePic == "" {
+			c.usr.ProfilePic = "https://i.imgur.com/cINvch3.png"
+		}
+
+		msgObj := Message{
+			UserID:     c.usr.UserID,
+			ProfilePic: c.usr.ProfilePic,
+			UserName:   c.usr.Username,
+			Msg:        string(message),
+		}
+
+		msg, err := json.Marshal(msgObj)
+		if err != nil {
+			log.Println(err)
+		} else {
+			c.hub.broadcast <- msg
+		}
 	}
 }
 
@@ -141,21 +174,30 @@ func ServeWs(room RoomManagerItf, authClient authClient.ClientItf, w http.Respon
 	}
 
 	userInfo := authClient.GetUserInfo(authToken)
-	if userInfo != nil {
-		log.Println(userInfo.Username)
-	} else {
+	if userInfo == nil {
 		log.Println("auth failed")
+		w.Write([]byte("User not found"))
 		return
 	}
 
 	hub := room.JoinRoom(roomID)
-
+	if hub == nil {
+		w.Write([]byte("Room not found"))
+		return
+	}
+	log.Println("CONNECTION UPGRADE roomID: ", roomID, " userID:", userInfo.UserID)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+
+	user := User{
+		UserID:     userInfo.UserID,
+		Username:   userInfo.Username,
+		ProfilePic: userInfo.ProfilePic,
+	}
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), usr: user}
 	client.hub.register <- client
 
 	go client.writePump()

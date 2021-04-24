@@ -10,11 +10,17 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-redis/redis/v8"
+	redigo "github.com/gomodule/redigo/redis"
 	authClient "github.com/lolmourne/go-accounts/client/userauth"
 	"github.com/lolmourne/go-groupchat/client"
+	redisCli "github.com/lolmourne/r-pipeline/client"
+	"github.com/lolmourne/r-pipeline/pubsub"
 )
 
 var addr = flag.String("addr", ":90", "http service address")
+var sub pubsub.RedisPubsub
+var rdb *redis.Client
 
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.URL)
@@ -30,9 +36,24 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
 
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     "34.101.216.10:6379",
+		Password: "skilvulredis", // no password set
+		DB:       0,              // use default DB
+	})
+
+	redisClient := redisCli.New(redisCli.SINGLE_MODE, "34.101.216.10:6379", 10,
+		redigo.DialReadTimeout(time.Duration(30)*time.Second),
+		redigo.DialWriteTimeout(time.Duration(30)*time.Second),
+		redigo.DialConnectTimeout(time.Duration(5)*time.Second),
+		redigo.DialPassword("skilvulredis"))
+	sub = pubsub.NewRedisPubsub(redisClient)
+
 	chString := make(chan string)
+	defer close(chString)
 	go func(ch chan string) {
 		for {
 			select {

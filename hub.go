@@ -4,9 +4,19 @@
 
 package main
 
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/lolmourne/r-pipeline/pubsub"
+)
+
 // Hub maintains the set of active clients and broadcasts messages to the
 // clients.
 type Hub struct {
+
 	// Registered clients.
 	clients map[*Client]bool
 
@@ -19,15 +29,33 @@ type Hub struct {
 	// Unregister requests from clients.
 	unregister chan *Client
 
-	roomID int
+	roomID int64
+
+	redisClient *redis.Client
 }
 
-func NewHub() *Hub {
-	return &Hub{
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
+func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Client) *Hub {
+	h := &Hub{
+		broadcast:   make(chan []byte),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		clients:     make(map[*Client]bool),
+		roomID:      roomID,
+		redisClient: redisClient,
+	}
+	subscriber.Subscribe(fmt.Sprintf("pubsub:chat:%d", roomID), h.readRoomPubsub, true)
+
+	return h
+}
+
+func (h *Hub) readRoomPubsub(msg string, err error) {
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	for client := range h.clients {
+		client.send <- []byte(msg)
 	}
 }
 
@@ -42,14 +70,7 @@ func (h *Hub) run() {
 				close(client.send)
 			}
 		case message := <-h.broadcast:
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
-				}
-			}
+			h.redisClient.Publish(context.Background(), fmt.Sprintf("pubsub:chat:%d", h.roomID), message)
 		}
 	}
 }
