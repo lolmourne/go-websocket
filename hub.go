@@ -6,10 +6,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/lolmourne/go-websocket/model"
+	"github.com/lolmourne/go-websocket/resource/chat"
+	"github.com/lolmourne/go-websocket/resource/user"
 	"github.com/lolmourne/r-pipeline/pubsub"
 )
 
@@ -32,9 +37,12 @@ type Hub struct {
 	roomID int64
 
 	redisClient *redis.Client
+
+	chatRsc chat.IResource
+	userRsc user.IResource
 }
 
-func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Client) *Hub {
+func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Client, chatRsc chat.IResource, userRsc user.IResource) *Hub {
 	h := &Hub{
 		broadcast:   make(chan []byte),
 		register:    make(chan *Client),
@@ -42,6 +50,8 @@ func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Clie
 		clients:     make(map[*Client]bool),
 		roomID:      roomID,
 		redisClient: redisClient,
+		chatRsc:     chatRsc,
+		userRsc:     userRsc,
 	}
 	subscriber.Subscribe(fmt.Sprintf("pubsub:chat:%d", roomID), h.readRoomPubsub, true)
 
@@ -64,6 +74,38 @@ func (h *Hub) run() {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
+
+			year, month, day := time.Now().Date()
+			startTime := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+			endDate := startTime.Add(time.Duration(24) * time.Hour)
+
+			chats := h.chatRsc.GetChatsByRoomByDate(h.roomID, startTime, endDate)
+			for _, chat := range chats {
+				userChat := h.userRsc.GetUserByID(chat.UserID)
+				if userChat == nil {
+					log.Println("User Nil")
+					continue
+				}
+
+				if userChat.ProfilePic == "" {
+					userChat.ProfilePic = "https://i.imgur.com/cINvch3.png"
+				}
+
+				msgChat := model.Message{
+					UserID:     chat.UserID,
+					ProfilePic: userChat.ProfilePic,
+					UserName:   userChat.Username,
+					Msg:        chat.Message,
+				}
+
+				msgJson, err := json.Marshal(msgChat)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				client.send <- msgJson
+			}
+
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)

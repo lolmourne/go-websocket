@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	authClient "github.com/lolmourne/go-accounts/client/userauth"
+	"github.com/lolmourne/go-websocket/model"
 )
 
 const (
@@ -62,13 +63,6 @@ type User struct {
 	Username   string
 }
 
-type Message struct {
-	UserID     int64  `json:"user_id"`
-	UserName   string `json:"username"`
-	ProfilePic string `json:"profile_pic"`
-	Msg        string `json:"msg"`
-}
-
 // readPump pumps messages from the websocket connection to the hub.
 //
 // The application runs readPump in a per-connection goroutine. The application
@@ -96,7 +90,9 @@ func (c *Client) readPump() {
 			c.usr.ProfilePic = "https://i.imgur.com/cINvch3.png"
 		}
 
-		msgObj := Message{
+		c.hub.chatRsc.AddChat(c.hub.roomID, c.usr.UserID, string(message))
+
+		msgObj := model.Message{
 			UserID:     c.usr.UserID,
 			ProfilePic: c.usr.ProfilePic,
 			UserName:   c.usr.Username,
@@ -185,7 +181,7 @@ func ServeWs(room RoomManagerItf, authClient authClient.ClientItf, w http.Respon
 		w.Write([]byte("Room not found"))
 		return
 	}
-	log.Println("CONNECTION UPGRADE roomID: ", roomID, " userID:", userInfo.UserID)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)

@@ -12,8 +12,12 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	redigo "github.com/gomodule/redigo/redis"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 	authClient "github.com/lolmourne/go-accounts/client/userauth"
 	"github.com/lolmourne/go-groupchat/client"
+	"github.com/lolmourne/go-websocket/resource/chat"
+	"github.com/lolmourne/go-websocket/resource/user"
 	redisCli "github.com/lolmourne/r-pipeline/client"
 	"github.com/lolmourne/r-pipeline/pubsub"
 )
@@ -66,8 +70,16 @@ func main() {
 
 	gcClient := client.NewClient("http://localhost:8080", time.Duration(30)*time.Second)
 	auCli := authClient.NewClient("http://localhost:7070", time.Duration(30)*time.Second)
+	userRsc := user.NewAuthCliRsc(auCli, time.Duration(60), time.Duration(30))
 
-	roomMgr := NewRoomManager(gcClient)
+	dbInit, err := sqlx.Connect("postgres", "host=34.101.216.10 user=skilvul password=skilvul123apa dbname=skilvul-groupchat sslmode=disable")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	dbRsc := chat.NewDBResource(dbInit)
+	roomMgr := NewRoomManager(gcClient, dbRsc, userRsc)
+
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/ch_test", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -82,7 +94,7 @@ func main() {
 		ServeWs(roomMgr, auCli, w, r)
 	})
 	log.Println("RUNNING----")
-	err := http.ListenAndServe(*addr, nil)
+	err = http.ListenAndServe(*addr, nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
