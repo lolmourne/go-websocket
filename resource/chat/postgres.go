@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"log"
 	"time"
 
 	"github.com/lolmourne/go-websocket/model"
@@ -50,6 +51,8 @@ func (dbr *DBResource) GetChatsByRoomByDate(roomID int64, startDate time.Time, e
 		AND
 			created_at <= $3
 	`
+
+	log.Println("query var", roomID, startDate, endDate)
 
 	chats, err := dbr.db.Queryx(query, roomID, startDate, endDate)
 	if err != nil {

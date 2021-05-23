@@ -80,10 +80,18 @@ func (h *Hub) run() {
 			endDate := startTime.Add(time.Duration(24) * time.Hour)
 
 			chats := h.chatRsc.GetChatsByRoomByDate(h.roomID, startTime, endDate)
-			for _, chat := range chats {
+			type HistoryMessage struct {
+				Chats []model.Message `json:"chats"`
+			}
+
+			if len(chats) == 0 {
+				continue
+			}
+
+			msgChats := make([]model.Message, len(chats))
+			for id, chat := range chats {
 				userChat := h.userRsc.GetUserByID(chat.UserID)
 				if userChat == nil {
-					log.Println("User Nil")
 					continue
 				}
 
@@ -97,14 +105,19 @@ func (h *Hub) run() {
 					UserName:   userChat.Username,
 					Msg:        chat.Message,
 				}
+				msgChats[id] = msgChat
 
-				msgJson, err := json.Marshal(msgChat)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				client.send <- msgJson
 			}
+
+			msgObj := HistoryMessage{
+				Chats: msgChats,
+			}
+			msgJson, err := json.Marshal(msgObj)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			client.send <- msgJson
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
