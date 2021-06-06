@@ -5,7 +5,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,6 +15,7 @@ import (
 	"github.com/lolmourne/go-websocket/resource/chat"
 	"github.com/lolmourne/go-websocket/resource/user"
 	"github.com/lolmourne/r-pipeline/pubsub"
+	"github.com/nsqio/go-nsq"
 )
 
 // Hub maintains the set of active clients and broadcasts messages to the
@@ -37,12 +37,13 @@ type Hub struct {
 	roomID int64
 
 	redisClient *redis.Client
+	nsqProducer *nsq.Producer
 
 	chatRsc chat.IResource
 	userRsc user.IResource
 }
 
-func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Client, chatRsc chat.IResource, userRsc user.IResource) *Hub {
+func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Client, chatRsc chat.IResource, userRsc user.IResource, nsqProd *nsq.Producer) *Hub {
 	h := &Hub{
 		broadcast:   make(chan []byte),
 		register:    make(chan *Client),
@@ -52,8 +53,18 @@ func NewHub(roomID int64, subscriber pubsub.RedisPubsub, redisClient *redis.Clie
 		redisClient: redisClient,
 		chatRsc:     chatRsc,
 		userRsc:     userRsc,
+		nsqProducer: nsqProd,
 	}
-	subscriber.Subscribe(fmt.Sprintf("pubsub:chat:%d", roomID), h.readRoomPubsub, true)
+
+	config := nsq.NewConfig()
+	q, _ := nsq.NewConsumer(fmt.Sprintf("pubsub-chat-%d", h.roomID), "1", config)
+	q.AddHandler(nsq.HandlerFunc(h.chatConsumerHandler))
+	err := q.ConnectToNSQD("localhost:4150")
+	if err != nil {
+		log.Panic("Could not connect")
+	}
+
+	//subscriber.Subscribe(fmt.Sprintf("pubsub:chat:%d", roomID), h.readRoomPubsub, true)
 
 	return h
 }
@@ -67,6 +78,13 @@ func (h *Hub) readRoomPubsub(msg string, err error) {
 	for client := range h.clients {
 		client.send <- []byte(msg)
 	}
+}
+
+func (h *Hub) chatConsumerHandler(message *nsq.Message) error {
+	for client := range h.clients {
+		client.send <- message.Body
+	}
+	return nil
 }
 
 func (h *Hub) run() {
@@ -125,7 +143,8 @@ func (h *Hub) run() {
 				close(client.send)
 			}
 		case message := <-h.broadcast:
-			h.redisClient.Publish(context.Background(), fmt.Sprintf("pubsub:chat:%d", h.roomID), message)
+			//h.redisClient.Publish(context.Background(), fmt.Sprintf("pubsub:chat:%d", h.roomID), message)
+			h.nsqProducer.Publish(fmt.Sprintf("pubsub-chat-%d", h.roomID), message)
 		}
 	}
 }

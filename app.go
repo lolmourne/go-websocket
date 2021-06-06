@@ -20,11 +20,13 @@ import (
 	"github.com/lolmourne/go-websocket/resource/user"
 	redisCli "github.com/lolmourne/r-pipeline/client"
 	"github.com/lolmourne/r-pipeline/pubsub"
+	"github.com/nsqio/go-nsq"
 )
 
 var addr = flag.String("addr", ":90", "http service address")
 var sub pubsub.RedisPubsub
 var rdb *redis.Client
+var nsqProducer *nsq.Producer
 
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.URL)
@@ -72,13 +74,20 @@ func main() {
 	auCli := authClient.NewClient("http://localhost:7070", time.Duration(30)*time.Second)
 	userRsc := user.NewAuthCliRsc(auCli, time.Duration(60), time.Duration(30))
 
-	dbInit, err := sqlx.Connect("postgres", "host=34.101.216.10 user=skilvul password=skilvul123apa dbname=skilvul-groupchat sslmode=disable")
+	dbInit, err := sqlx.Connect("postgres", "host=34.101.255.14 user=skilvul password=skilvul123apa dbname=skilvul-groupchat sslmode=disable")
 	if err != nil {
 		log.Fatalln(err)
 	}
 
+	config := nsq.NewConfig()
+	prod, err := nsq.NewProducer("localhost:4150", config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	nsqProducer = prod
+
 	dbRsc := chat.NewDBResource(dbInit)
-	roomMgr := NewRoomManager(gcClient, dbRsc, userRsc)
+	roomMgr := NewRoomManager(gcClient, dbRsc, userRsc, nsqProducer)
 
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/ch_test", func(w http.ResponseWriter, r *http.Request) {
